@@ -34,7 +34,7 @@ struct ContentView: View {
                     await main()
                 }
             }) {
-                Text("POSTリクエスト")
+                Text("Verify with Wallet API")
                     .padding()
                     .background(Color.blue)
                     .foregroundColor(.white)
@@ -78,7 +78,7 @@ struct ContentView: View {
             
             let descriptor = PKIdentityDriversLicenseDescriptor()
             descriptor.addElements([.age(atLeast: 18), .documentNumber, .issuingAuthority], intentToStore: .willNotStore)
-            descriptor.addElements([.givenName, .familyName, .address,], intentToStore: .mayStore(days: 300000))
+            descriptor.addElements([.givenName, .familyName, .address,], intentToStore: .mayStore)
             // descriptor.addElements([.dateOfBirth], intentToStore: .mayStore(days: 300000))
 
             // let nonceData = req.data.nonce.data(using: .utf8)
