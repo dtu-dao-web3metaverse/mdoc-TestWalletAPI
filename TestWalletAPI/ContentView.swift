@@ -8,14 +8,31 @@
 import SwiftUI
 import PassKit
 
+// let baseURL = "https://fido-kokukuma.jp.ngrok.io"
+let baseURL = "http://localhost:8080"
+
+extension Data {
+    func base64URLEncodedString() -> String {
+        let base64String = self.base64EncodedString()
+        let base64URLString = base64String
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "="))
+        return base64URLString
+    }
+}
+
 struct ContentView: View {
     @State private var responseMessage = ""
+    @State private var elements: [Element] = []
     
     var body: some View {
         VStack {
             Button(action: {
-                // postRequest()
-                requestIdentityData()
+                elements.removeAll()
+                Task {
+                    await main()
+                }
             }) {
                 Text("POSTリクエスト")
                     .padding()
@@ -24,91 +41,152 @@ struct ContentView: View {
                     .cornerRadius(10)
             }
             
-            Text(responseMessage)
-                .padding()
+            if !elements.isEmpty {
+                List(elements) { element in
+                    VStack(alignment: .leading) {
+                        Text("Namespace: \(element.namespace)")
+                        Text("Identifier: \(element.identifier)")
+                        Text("Value: \(String(describing: element.value))")
+                    }
+                    .padding()
+                }
+            }else{
+                Text(responseMessage).padding()
+            }
+
         }
         .padding()
     }
     
-    func requestIdentityData() {
-        let descriptor = PKIdentityDriversLicenseDescriptor()
-        descriptor.addElements([.age(atLeast: 18)], intentToStore: .willNotStore)
-        descriptor.addElements([.givenName, .familyName, .portrait], intentToStore: .mayStore(days: 30))
+    func decodeBase64URLString(_ base64URLString: String) -> Data? {
+        var base64 = base64URLString
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
         
-        let controller = PKIdentityAuthorizationController()
-        controller.checkCanRequestDocument(descriptor) { canRequest in
-            if canRequest {
-                // サーバーからノンスを取得（例示のため、ここでは固定の値を使用）
-                let nonce = "server-generated-nonce"
-                let nonceData = nonce.data(using: .utf8)
+        let paddingLength = base64.count % 4
+        if paddingLength > 0 {
+            base64.append(String(repeating: "=", count: 4 - paddingLength))
+        }
 
-                let request = PKIdentityRequest()
-                request.descriptor = descriptor
-                request.merchantIdentifier = "your-merchant-identifier"
-                request.nonce = nonceData
-                
-                requestDocument(controller: controller, request: request)
-            } else {
-                print("Cannot request document")
+        return Data(base64Encoded: base64)
+    }
+
+    
+    func main() async {
+        do {
+            let req = try await fetchIdentityRequest()
+            
+            let descriptor = PKIdentityDriversLicenseDescriptor()
+            descriptor.addElements([.age(atLeast: 18), .documentNumber, .issuingAuthority], intentToStore: .willNotStore)
+            descriptor.addElements([.givenName, .familyName, .address,], intentToStore: .mayStore(days: 300000))
+            // descriptor.addElements([.dateOfBirth], intentToStore: .mayStore(days: 300000))
+
+            // let nonceData = req.data.nonce.data(using: .utf8)
+            let nonceData = decodeBase64URLString(req.data.nonce)
+
+            let request = PKIdentityRequest()
+            request.descriptor = descriptor
+            request.merchantIdentifier = "PassKit_Identity_Test_Merchant_ID"
+            request.nonce = nonceData
+            
+            
+            let controller = PKIdentityAuthorizationController()
+            controller.checkCanRequestDocument(descriptor) { canRequest in
+                if canRequest {
+                    requestDocument(controller: controller, request: request, session_id: req.session_id)
+                } else {
+                    print("Cannot request document")
+                }
+            }
+        } catch {
+            DispatchQueue.main.async {
+                responseMessage = "Error: \(error.localizedDescription)"
             }
         }
     }
-    
-    func requestDocument(controller: PKIdentityAuthorizationController, request: PKIdentityRequest) {
+
+    func requestDocument(controller: PKIdentityAuthorizationController, request: PKIdentityRequest, session_id: String) {
         Task {
             do {
                 let document = try await controller.requestDocument(request)
-                // ここで、document.encryptedDataをサーバーに送信して検証
-                // e.g., sendToServer(document.encryptedData)
-                print("Document received: \(document)")
-            } catch {
+
+                guard let url = URL(string: "\(baseURL)/verifyIdentityResponse") else { return }
+                
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                
+                let postData: [String: Any] = [
+                    "session_id": session_id,
+                    "protocol": "apple",
+                    "data": document.encryptedData.base64URLEncodedString(),
+                    // "origin": "dummy",
+                ]
+                request.httpBody = try? JSONSerialization.data(withJSONObject: postData, options: [])
+                request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+                
+                let task = URLSession.shared.dataTask(with: request) { data, response, error in
+                    if let error = error {
+                        print("Error: \(error)")
+                        return
+                    }
+                    
+                    guard let data = data else { return }
+                    
+                    do {
+                        let responseData = try JSONDecoder().decode(VerifyResponse.self, from: data)
+                        DispatchQueue.main.async {
+                            handleResponseData(responseData)
+                        }
+                    } catch {
+                        print("Decoding error: \(error)")
+                    }
+                }
+                task.resume()
+                
+           } catch {
                 print("Request failed: \(error.localizedDescription)")
             }
         }
     }
 
-
-
-    func postRequest() {
-        guard let url = URL(string: "https://fido-kokukuma.jp.ngrok.io/getIdentityRequest") else { return }
-        
-        var request = URLRequest(url: url)
+    func fetchIdentityRequest() async throws -> IdentityRequest {
+        let url = URL(string: "\(baseURL)/getIdentityRequest")
+        var request = URLRequest(url: url!)
         request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
-        // 送信するデータ（例としてJSONデータ）
-        let postData: [String: Any] = ["protocol": "preview"]
-        request.httpBody = try? JSONSerialization.data(withJSONObject: postData, options: [])
-        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        let postData: [String: Any] = ["protocol": "apple"]
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: postData, options: [])
+        } catch {
+            throw error
+        }
         
-        let task = URLSession.shared.dataTask(with: request) { data, response, error in
-            if let error = error {
-                print("Error: \(error)")
-                return
-            }
-            
-            guard let data = data else { return }
-            
-            do {
-                // JSONデータをデコード
-                let responseData = try JSONDecoder().decode(IdentityRequest.self, from: data)
-                // デコードされたデータを使用
-                DispatchQueue.main.async {
-                    handleResponseData(responseData)
-                }
-            } catch {
-                print("Decoding error: \(error)")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        if let httpResponse = response as? HTTPURLResponse {
+            guard (200...299).contains(httpResponse.statusCode) else {
+                throw URLError(.badServerResponse)
             }
         }
         
-        task.resume()
+        let responseData = try JSONDecoder().decode(IdentityRequest.self, from: data)
+        return responseData
     }
-    
-    func handleResponseData(_ responseData: IdentityRequest) {
-        // ここでデコードされたデータをUIに反映させたり、他の処理を行う
-        responseMessage = """
-        ID: \(responseData.session_id)
-        Data: \(responseData.data)
-        """
+
+
+    func handleResponseData(_ responseData: VerifyResponse) {
+        if let error = responseData.error {
+            responseMessage = "Error: \(error)"
+        } else {
+            responseMessage = "No error"
+        }
+
+        if let elements = responseData.elements {
+            self.elements = elements
+        } else {
+            self.elements = []
+        }
     }
 
 }

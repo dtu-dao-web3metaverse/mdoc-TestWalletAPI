@@ -24,7 +24,7 @@
 	</dict>
 	<key>com.apple.developer.in-app-identity-presentment.merchant-identifiers</key>
 	<array>
-		<string>your-merchant-identifier</string>
+		<string>PassKit_Identity_Test_Merchant_ID</string>
 	</array>
 </dict>
 </plist>
