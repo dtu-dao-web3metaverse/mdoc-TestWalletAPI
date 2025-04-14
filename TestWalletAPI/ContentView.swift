@@ -9,8 +9,8 @@ import SwiftUI
 import PassKit
 
 // let baseURL = "https://fido-kokukuma.jp.ngrok.io"
-let baseURL = "http://localhost:8080"
-
+//let baseURL = "http://localhost:8080"
+let baseURL = "https://0312-240d-1a-fd8-8700-316d-89df-734b-85f7.ngrok-free.app"
 extension Data {
     func base64URLEncodedString() -> String {
         let base64String = self.base64EncodedString()
@@ -88,6 +88,11 @@ struct ContentView: View {
             request.descriptor = descriptor
             request.merchantIdentifier = "PassKit_Identity_Test_Merchant_ID"
             request.nonce = nonceData
+
+            // @@ nonce,merchantId,publickeyをログに出力
+            print("🔍 nonce: \(nonceData?.map { String(format: "%02x", $0) }.joined() ?? "nil"))")
+            print("🧾 merchantIdentifier: \(request.merchantIdentifier ?? "nil")")
+            print("🔑 readerPublicKey (base64): \(req.data.readerPublicKey ?? "nil")")
             
             
             let controller = PKIdentityAuthorizationController()
@@ -109,6 +114,9 @@ struct ContentView: View {
         Task {
             do {
                 let document = try await controller.requestDocument(request)
+
+                // @@提示データの大きさ確認
+                print("✅ encryptedData byte size: \(document.encryptedData.count)")
 
                 guard let url = URL(string: "\(baseURL)/verifyIdentityResponse") else { return }
                 
