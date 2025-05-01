@@ -26,5 +26,7 @@
 	<array>
 		<string>PassKit_Identity_Test_Merchant_ID</string>
 	</array>
+	<key>com.apple.developer.proximity-reader.identity.display</key>
+	<true/>
 </dict>
 </plist>
